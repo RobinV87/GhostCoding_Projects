@@ -1,0 +1,128 @@
+#include <M5Unified.h>
+
+// --- State Management ---
+enum Mode { DICE, MTG, CYBERPUNK };
+Mode currentMode = DICE;
+
+// Dice Logic
+int diceTypes[] = {4, 6, 8, 10, 12, 20, 100};
+int diceIdx = 5; // Default to D20
+int lastRoll = 0;
+
+// MTG Logic
+int lifeTotal = 40;
+int cmdDamage = 0;
+
+// --- UI Rendering ---
+void drawUI() {
+    M5.Display.startWrite();
+    M5.Display.clear();
+    
+    // Header
+    M5.Display.setTextDatum(top_left);
+    M5.Display.setTextColor(TFT_DARKGREY);
+    M5.Display.setFont(&fonts::FreeSans9pt7b);
+
+    if (currentMode == DICE) {
+        M5.Display.drawString("MODE: DICE", 10, 5);
+        M5.Display.setTextColor(TFT_WHITE);
+        M5.Display.drawCenterString("D" + String(diceTypes[diceIdx]), 80, 35, &fonts::FreeSans12pt7b);
+        M5.Display.drawCenterString(String(lastRoll), 80, 65, &fonts::FreeSansBold24pt7b);
+    } 
+    else if (currentMode == MTG) {
+        M5.Display.drawString("MODE: MTG", 10, 5);
+        M5.Display.setTextColor(TFT_WHITE);
+        M5.Display.drawRightString("CMD: " + String(cmdDamage), 150, 5);
+        M5.Display.drawCenterString(String(lifeTotal), 80, 50, &fonts::FreeSansBold24pt7b);
+    } 
+    else if (currentMode == CYBERPUNK) {
+        M5.Display.setTextColor(TFT_RED);
+        M5.Display.drawString("CP_RED//S3", 10, 5);
+        M5.Display.setTextColor(TFT_CYAN);
+        M5.Display.drawCenterString(String(lastRoll), 80, 50, &fonts::FreeSansBold24pt7b);
+    }
+    M5.Display.endWrite();
+}
+
+void rollAnim(int sides) {
+    for (int i = 0; i < 8; i++) {
+        int temp = random(1, sides + 1);
+        M5.Display.fillRect(30, 50, 100, 60, TFT_BLACK);
+        M5.Display.drawCenterString(String(temp), 80, 60, &fonts::FreeSansBold24pt7b);
+        M5.Speaker.tone(random(300, 600), 20);
+        delay(30 + (i * 15));
+    }
+}
+
+// --- Setup ---
+void setup() {
+    auto cfg = M5.config();
+    M5.begin(cfg);
+    
+    // S3 Screen setup
+    M5.Display.setRotation(1); 
+    M5.Display.setBrightness(120);
+    
+    // Initialize IMU
+    M5.Imu.init();
+    
+    drawUI();
+}
+
+// --- Main Loop ---
+void loop() {
+    M5.update();
+
+    // 1. Switch Mode: Hold Side Button (BtnB)
+    if (M5.BtnB.pressedFor(800)) {
+        currentMode = static_cast<Mode>((currentMode + 1) % 3);
+        M5.Speaker.tone(1200, 100);
+        drawUI();
+        while(M5.BtnB.isPressed()) { M5.update(); } // Wait for release
+    }
+
+    // 2. Mode Specific Logic
+    if (currentMode == DICE) {
+        // Roll Dice
+        if (M5.BtnA.wasClicked()) {
+            rollAnim(diceTypes[diceIdx]);
+            lastRoll = random(1, diceTypes[diceIdx] + 1);
+            drawUI();
+        }
+        // Cycle Dice Type
+        if (M5.BtnB.wasClicked()) {
+            diceIdx = (diceIdx + 1) % 7;
+            M5.Speaker.tone(800, 50);
+            drawUI();
+        }
+    } 
+    else if (currentMode == MTG) {
+        // Life Control
+        if (M5.BtnA.wasClicked()) { lifeTotal--; M5.Speaker.tone(400, 50); drawUI(); }
+        if (M5.BtnB.wasClicked()) { lifeTotal++; M5.Speaker.tone(900, 50); drawUI(); }
+        
+        // Shake for Commander Damage
+        float ax, ay, az;
+        M5.Imu.getAccel(&ax, &ay, &az);
+        if ((abs(ax) + abs(ay) + abs(az)) > 3.8) {
+            cmdDamage++;
+            lifeTotal--;
+            M5.Speaker.tone(200, 200);
+            drawUI();
+            delay(500); // Prevent multi-trigger
+        }
+    } 
+    else if (currentMode == CYBERPUNK) {
+        // D10 Roll with Exploding/Fumble Audio
+        if (M5.BtnA.wasClicked()) {
+            rollAnim(10);
+            lastRoll = random(1, 11);
+            drawUI();
+            if (lastRoll == 10) { M5.Speaker.tone(1500, 300); }
+            else if (lastRoll == 1) { M5.Speaker.tone(150, 600); }
+            else { M5.Speaker.tone(600, 50); }
+        }
+    }
+
+    delay(10);
+}
