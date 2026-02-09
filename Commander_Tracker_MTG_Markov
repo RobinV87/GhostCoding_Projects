@@ -1,0 +1,191 @@
+#include <SPI.h>
+#include <TFT_eSPI.h>
+#include <XPT2046_Touchscreen.h>
+
+// --- Hardware Pins (CYD / ESP32-2432S028R) ---
+#define LED_RED 4
+#define LED_GREEN 16
+#define LED_BLUE 17
+#define TFT_BL 21
+#define XPT2046_CS 33
+#define XPT2046_IRQ 36
+
+// --- Sanguine Aesthetic ---
+#define SANGUINE_RED 0xB800 
+#define BLOOD_GLOW   0xF800 
+#define VOID_BLACK   0x0000
+
+SPIClass touchSPI = SPIClass(VSPI);
+XPT2046_Touchscreen touch(XPT2046_CS, XPT2046_IRQ);
+TFT_eSPI tft = TFT_eSPI();
+
+// --- Markovian State ---
+int life = 40;
+int tribute = 0; // Commander Tax
+int bloodDebt[3] = {0, 0, 0}; // Commander Damage
+int poison = 0, energy = 0, xp = 0, rads = 0, vampires = 0;
+int screenState = 0; 
+
+// --- Function Prototypes ---
+void drawMainUI();
+void drawResourceUI();
+void drawGameOver();
+void updateUnderglow();
+void checkDeath();
+
+void updateUnderglow() {
+  // Edgar's color is Red. We kill Green and Blue.
+  digitalWrite(LED_GREEN, HIGH); 
+  digitalWrite(LED_BLUE, HIGH);
+  
+  if (screenState == 3) { // Pulsing alert on death
+    digitalWrite(LED_RED, (millis() % 1000 < 500) ? LOW : HIGH); 
+  } else if (life <= 10) {
+    digitalWrite(LED_RED, LOW); // Solid warning
+  } else {
+    digitalWrite(LED_RED, LOW); // Standard Sanguine glow
+  }
+}
+
+void drawMainUI() {
+  tft.fillScreen(VOID_BLACK);
+  tft.drawRect(0, 0, 320, 240, SANGUINE_RED);
+  tft.drawFastHLine(0, 35, 320, SANGUINE_RED);
+  tft.drawFastVLine(80, 35, 205, SANGUINE_RED);  
+  tft.drawFastVLine(240, 35, 205, SANGUINE_RED); 
+
+  tft.setTextColor(SANGUINE_RED);
+  tft.setTextDatum(MC_DATUM); 
+  tft.drawString("EMINENCE_PROTOCOL_ACTIVE", 160, 18, 2);
+
+  // --- LEFT: TRIBUTE ---
+  tft.drawString("TRIBUTE", 40, 55, 2);
+  tft.drawNumber(tribute, 40, 85, 4);
+  tft.drawRoundRect(10, 105, 60, 35, 4, SANGUINE_RED); tft.drawString("+2", 40, 122, 2);
+  
+  tft.drawRect(5, 170, 70, 55, SANGUINE_RED);
+  tft.drawString("STASH", 40, 195, 2);
+
+  // --- CENTER: BLOOD RESERVE ---
+  tft.setTextColor(BLOOD_GLOW);
+  tft.drawString("BLOOD_RESERVE", 160, 55, 2);
+  tft.drawNumber(life, 160, 115, 8); 
+  
+  tft.drawCircle(125, 200, 25, SANGUINE_RED); tft.drawString("-", 125, 200, 4);
+  tft.drawCircle(195, 200, 25, SANGUINE_RED); tft.drawString("+", 195, 200, 4);
+
+  // --- RIGHT: BLOOD DEBT ---
+  tft.setTextColor(SANGUINE_RED);
+  tft.drawString("DEBT", 280, 55, 2);
+  for (int i = 0; i < 3; i++) {
+    int y = 90 + (i * 50);
+    tft.drawNumber(bloodDebt[i], 280, y, 4); 
+    tft.drawFastHLine(255, y+15, 50, SANGUINE_RED);
+  }
+}
+
+void drawResourceUI() {
+  tft.fillScreen(VOID_BLACK);
+  tft.drawRect(0, 0, 320, 240, SANGUINE_RED);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(SANGUINE_RED);
+  tft.drawString("SANGUINE_STASH_OVERRIDE", 160, 18, 2);
+
+  const char* labels[] = {"POISON", "ENERGY", "EXPERIENCE", "RADIATION", "VAMPIRES"};
+  int vals[] = {poison, energy, xp, rads, vampires};
+  
+  for (int i = 0; i < 5; i++) {
+    int y = 55 + (i * 38);
+    tft.drawRect(10, y-15, 300, 32, SANGUINE_RED);
+    tft.setTextDatum(ML_DATUM); tft.drawString(labels[i], 20, y, 2);
+    tft.setTextDatum(MC_DATUM); tft.drawNumber(vals[i], 185, y, 4);
+    tft.drawRect(230, y-13, 35, 28, SANGUINE_RED); tft.drawString("-", 247, y, 2);
+    tft.drawRect(270, y-13, 35, 28, SANGUINE_RED); tft.drawString("+", 287, y, 2);
+  }
+  tft.drawString("[ TAP BASE TO RETURN ]", 160, 228, 1);
+}
+
+void drawGameOver() {
+  tft.fillScreen(VOID_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(BLOOD_GLOW);
+  tft.drawString("LINEAGE_EXTINGUISHED", 160, 40, 2);
+  tft.drawString("VAULT_CLOSED", 160, 120, 4);
+  tft.drawString("[ TAP TO REAWAKEN ]", 160, 210, 1);
+}
+
+void checkDeath() {
+  bool cmdLethal = false;
+  for (int i = 0; i < 3; i++) { if (bloodDebt[i] >= 21) cmdLethal = true; }
+  if (life <= 0 || poison >= 10 || cmdLethal) {
+    screenState = 3; updateUnderglow(); drawGameOver();
+  }
+}
+
+void bootSequence() {
+  tft.fillScreen(VOID_BLACK);
+  tft.setTextColor(SANGUINE_RED);
+  tft.setTextDatum(TL_DATUM);
+  tft.setCursor(10, 10);
+  tft.println("INITIALIZING GHOSTROOT_OS...");
+  delay(400);
+  tft.println("> MOUNTING MARKOV_LINEAGE...");
+  delay(600);
+  tft.println("> SENSING BLOOD_RESERVES...");
+  delay(400);
+  tft.println("> EMINENCE_READY.");
+  delay(800);
+}
+
+void setup() {
+  pinMode(LED_RED, OUTPUT); pinMode(LED_GREEN, OUTPUT); pinMode(LED_BLUE, OUTPUT);
+  pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, HIGH);
+  tft.init(); tft.setRotation(1); tft.invertDisplay(true);
+  
+  touchSPI.begin(25, 39, 32, 33);
+  touch.begin(touchSPI); touch.setRotation(1);
+  
+  bootSequence();
+  updateUnderglow(); 
+  drawMainUI();
+}
+
+void loop() {
+  if (touch.touched()) {
+    TS_Point p = touch.getPoint();
+    int16_t x = map(p.x, 300, 3800, 0, 320);
+    int16_t y = map(p.y, 300, 3800, 0, 240);
+
+    if (screenState == 3) {
+       life = 40; tribute = 0; poison = 0; energy = 0; xp = 0; rads = 0; vampires = 0;
+       for(int i=0; i<3; i++) bloodDebt[i] = 0;
+       screenState = 0; updateUnderglow(); drawMainUI(); delay(500);
+    } 
+    else if (screenState == 0) { 
+      if (x < 80 && y > 160) { screenState = 1; drawResourceUI(); delay(250); } // Go to Stash
+      if (x < 80 && y > 105 && y < 140) { tribute += 2; drawMainUI(); delay(200); }
+      if (x > 100 && x < 150 && y > 170) { life--; updateUnderglow(); checkDeath(); if(screenState==0) drawMainUI(); delay(150); }
+      if (x > 170 && x < 220 && y > 170) { life++; updateUnderglow(); drawMainUI(); delay(150); }
+      if (x > 240) {
+        int i = (y - 70) / 50;
+        if (i >= 0 && i < 3) { bloodDebt[i]++; life--; updateUnderglow(); checkDeath(); if(screenState==0) drawMainUI(); delay(200); }
+      }
+    } 
+    else if (screenState == 1) { 
+      if (y > 210) { screenState = 0; drawMainUI(); delay(250); } // Return
+      if (x > 220) {
+        int idx = (y - 45) / 38;
+        if (idx >= 0 && idx < 5) {
+          int mod = (x < 265) ? -1 : 1;
+          if (idx == 0) poison += mod; 
+          else if (idx == 1) energy += mod; 
+          else if (idx == 2) xp += mod; 
+          else if (idx == 3) rads += mod; 
+          else if (idx == 4) vampires += mod;
+          if (poison < 0) poison = 0; 
+          checkDeath(); if(screenState == 1) drawResourceUI(); delay(200);
+        }
+      }
+    }
+  }
+}
